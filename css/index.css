@@ -1,0 +1,12 @@
+#mazecraft {
+    margin: auto;
+    text-align: center;
+    background-image: url('../img/map/map.png');
+    background-repeat: no-repeat;
+    height: 624px;
+    width: 848px;
+    padding-top: 100px;
+}
+#button {
+    padding-top: 100px;
+}

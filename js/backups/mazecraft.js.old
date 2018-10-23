@@ -1,0 +1,448 @@
+var ctx = document.getElementById('ctx').getContext('2d');
+var INTERVAL = 40
+var HEIGHT = 624;
+var MAP_HEIGHT = 624;
+var WIDTH = 848;
+var MAP_WIDTH = 848;
+
+var TILE_SIZE = 16;
+var timeWhenGameStarted = Date.now();
+var frameCount = 0;
+var seconds = 0;
+var minutes = 0;
+
+var pointer = {x:0,y:0};
+var builder;
+var construction;
+
+var Img = {};
+Img.map = new Image();
+Img.map.src = 'img/map.png';
+var array_2Dmap = array_2Dmap_base;
+
+//move entities into own JS file
+generateEntity = function(id,race,x,y,height,width,color,opacity) {
+    var self = {
+        id:id,
+        race:race,
+        x:x,
+        y:y,
+        height:height,
+        width:width,
+        color:color,
+        opacity:opacity
+    }
+
+    self.draw = function() {
+        ctx.save();
+
+        var x = (self.x - builder.x) + WIDTH/2 - self.width/2;
+        var y = (self.y - builder.y) + HEIGHT/2 - self.height/2;
+
+        /*
+         if (builder.x < (WIDTH/2))
+         x = entity.x;
+         if (builder.y < (HEIGHT/2))
+         y = entity.y;
+         if (builder.x > (MAP_WIDTH-(WIDTH/2)) )
+         x = (WIDTH-MAP_WIDTH)+entity.x;
+         if (builder.y > (MAP_HEIGHT-(HEIGHT/2)) )
+         y = (HEIGHT-MAP_HEIGHT)+entity.y;
+         */
+
+        ctx.fillStyle = self.color;
+        ctx.globalAlpha = self.opacity;
+        ctx.fillRect(x-self.width/2,y-self.height/2,self.width,self.height);
+
+        ctx.restore();
+    }
+
+    self.update = function() {
+        self.draw();
+    }
+
+    return self;
+}
+
+generateActor = function(id,race,x,y,height,width,color,opacity,spdX,spdY,destination,destX,destY) {
+
+    var self = generateEntity(id,race,x,y,height,width,color,opacity);
+    // moving
+    self.spdX = spdX;
+    self.spdY = spdY;
+    self.destination = destination;
+    self.destX = destX;
+    self.destY = destY;
+
+    self.isPositionValid = function() {
+        if(self.x < self.width/2)
+            self.x = self.width/2;
+        if(self.x > MAP_WIDTH-self.width/2)
+            self.x = MAP_WIDTH - self.width/2;
+        if(self.y < self.height/2)
+            self.y = self.height/2;
+        if(self.y > MAP_HEIGHT - self.height/2)
+            self.y = MAP_HEIGHT - self.height/2;
+    }
+
+    self.updatePosition = function() {
+
+        if (self.destination == true) {
+            var distanceX = self.destX - self.x;
+            var distanceY = self.destY - self.y;
+            var distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY);
+
+            if (distance > 1) {
+                if (self.destX > self.x) //move right
+                    self.x += self.spdX;
+                if (self.destX < self.x) //move left
+                    self.x -= self.spdX;
+                if (self.destY < self.y) //move up
+                    self.y -= self.spdY;
+                if (self.destY > self.y) //move down
+                    self.y += self.spdY;
+            }
+
+            self.isPositionValid();
+
+            if (testCollisionEntity(self, {x: self.destX, y: self.destY, width: 1, height: 1}))
+                self.destination = false;
+        }
+    }
+
+    var super_update = self.update;
+    self.update = function() {
+        self.updatePosition();
+        super_update();
+    }
+
+    return self;
+
+}
+
+generateBuilding = function(id,race,x,y,height,width,color,opacity,footprint) {
+
+    var self = generateEntity(id,race,x,y,height,width,color,opacity);
+    //footprint
+    self.footprint = footprint;
+
+    return self;
+
+}
+
+builder = function() {
+
+    var self = generateActor('Builder','test',WIDTH/2,HEIGHT/2,20,20,'blue',1,20,20,false,0,0);
+    //building
+    self.building = false;
+
+    var super_update = self.update;
+    self.update = function() {
+        super_update();
+        if (self.building)
+            construction.update();
+    }
+
+    return self;
+
+}
+
+construction = function () {
+
+    var self = generateBuilding(builder.id + '_construction',builder.race,pointer.x,pointer.y,32,32,'red',0.7,{x:0,y:0});
+
+    var super_draw = self.draw;
+    self.draw = function() {
+        var f = returnCellCords(pointer.x,pointer.y);
+
+        if (f.x<124 && f.y<199 && f.x > -1 && f.y > -1) {
+            if ( (array_2Dmap[f.y][f.x] + array_2Dmap[f.y+1][f.x] + array_2Dmap[f.y][f.x+1] + array_2Dmap[f.y+1][f.x+1] ) == 0) { //0=path,1=wall/water,2=water_shallow,3=tower
+                self.color = 'green';
+            } else {
+                self.color = 'red';
+            }
+
+            self.footprint = [
+                {x:f.x,y:f.y},
+                {x:f.x+1,y:f.y},
+                {x:f.x,y:f.y+1},
+                {x:f.x+1,y:f.y+1}
+            ];
+            self.x = (f.x+2)*TILE_SIZE;
+            self.y = (f.y+2)*TILE_SIZE;
+
+            super_draw();
+        }
+    }
+
+    return self;
+
+}
+
+Tower = function (id,race,x,y,height,width,color,opacity,footprint,atkSpd,atkDmg) {
+
+    var self = generateBuilding(id,race,x,y,height,width,color,opacity,footprint);
+    // attacking
+    self.atkSpd = atkSpd;
+    self.atkDmg = atkDmg;
+
+    self.setFootprint = function() {
+        for (var key in self.footprint) {
+            array_2Dmap[self.footprint[key].y][self.footprint[key].x] = 3;
+        }
+    }
+
+    var super_update = self.update;
+    self.update = function() {
+        super_update();
+        self.setFootprint();
+    }
+
+    Tower.list[id] = self;
+}
+
+Tower.list = {};
+
+Tower.update = function(){
+    for (var key in Tower.list) {
+        Tower.list[key].update()
+    }
+}
+
+Creep = function(id,race,x,y,height,width,color,opacity,spdX,spdY,destination,destX,destY) {
+
+    var self = generateActor(id,race,x,y,height,width,color,opacity,spdX,spdY,destination,destX,destY);
+
+    self.isPositionValid = function() {
+        var cords = returnCellCords(self.x, self.y);
+        if (array_2Dmap[cords.y][cords.x]%2 === 0) { //0=path,1=wall/water,2=water_shallow,3=tower,4=spawn,5=visited,6=goal
+            self.x += self.spdX;
+            self.y += self.spdY;
+            self.destination = false;
+        }
+    }
+
+    var super_updatePosition = self.updatePosition;
+    self.updatePosition = function() {
+        //set dest and destX, destY
+    if (self.destination == false){
+        var currentMap = array_2Dmap;
+        var cords = returnCellCords(self.x, self.y);
+
+        var path = findShortestPath(cords, currentMap)
+
+        if (path) {
+            if (path[0] === 'North') {
+                cords.y--;
+                self.destX = (cords.x * TILE_SIZE) + (TILE_SIZE / 2);
+                self.destY = (cords.y * TILE_SIZE) + (TILE_SIZE / 2);
+            } else if (path[0] === 'East') {
+                cords.x++;
+                self.destX = (cords.x * TILE_SIZE) + (TILE_SIZE / 2);
+                self.destY = (cords.y * TILE_SIZE) + (TILE_SIZE / 2);
+            } else if (path[0] === 'South') {
+                cords.y++;
+                self.destX = (cords.x * TILE_SIZE) + (TILE_SIZE / 2);
+                self.destY = (cords.y * TILE_SIZE) + (TILE_SIZE / 2);
+            } else if (path[0] === 'West') {
+                cords.x--;
+                self.destX = (cords.x * TILE_SIZE) + (TILE_SIZE / 2);
+                self.destY = (cords.y * TILE_SIZE) + (TILE_SIZE / 2);
+            }
+
+
+        } else {
+            console.log('Path blocked');
+        }
+    }
+
+        super_updatePosition();
+    }
+
+    var super_update = self.update;
+    self.update = function() {
+        super_update();
+    }
+
+    Creep.list[id] = self;
+
+}
+
+Creep.list = {};
+
+Creep.update = function(){
+    for (var key in Creep.list) {
+        Creep.list[key].update()
+    }
+}
+
+
+// to refactor
+returnCellCords= function(x,y) {
+
+    var e = returnMapPosition(x,y);
+
+    x = Math.floor(e.x/16)-1;
+    y = Math.floor(e.y/16)-1;
+
+    if (x < 0)
+        x = 0;
+    if (y < 0)
+        y = 0;
+    if (x > array_2Dmap[0].length)
+        x = array_2Dmap[0].length;
+    if (y > array_2Dmap.length)
+        y = array_2Dmap.length;
+    return {x:x, y:y};
+
+}
+
+returnMapPosition = function(this_x,this_y) {
+
+    var x = (this_x-(WIDTH/2))+builder.x;
+    var y = (this_y-(HEIGHT/2))+builder.y;
+
+    /*
+    if (builder.x < (WIDTH/2))
+        x = this_x;
+    if (builder.y < (HEIGHT/2))
+        y = this_y;
+    if (builder.x > (MAP_WIDTH-(WIDTH/2)) )
+        x = this_x+(MAP_WIDTH-WIDTH);
+    if (builder.y > (MAP_HEIGHT-(HEIGHT/2)) )
+        y = this_y+(MAP_HEIGHT-HEIGHT);
+    */
+
+    return {
+        x:x,
+        y:y
+    };
+
+}
+
+testCollisionEntity = function (entity,entity2) { //return if colliding (true/false)
+    var rect1 = {
+        x:entity.x-entity.width/2,
+        y:entity.y-entity.height/2,
+        width:entity.width,
+        height:entity.height,
+    }
+    var rect2 = {
+        x:entity2.x-entity2.width/2,
+        y:entity2.y-entity2.height/2,
+        width:entity2.width,
+        height:entity2.height,
+    }
+    return testCollisionRectRect(rect1,rect2);
+
+}
+
+testCollisionRectRect = function(rect1,rect2){
+    return rect1.x <= rect2.x+rect2.width
+        && rect2.x <= rect1.x+rect1.width
+        && rect1.y <= rect2.y + rect2.height
+        && rect2.y <= rect1.y + rect1.height;
+}
+
+//to stay here
+drawMap = function(){
+    //var x = WIDTH/2 - builder.x;
+    //var y = HEIGHT/2 - builder.y;
+    var x = 0;
+    var y = 0;
+
+    /*
+     if (builder.x < (WIDTH/2))
+     x = 0;
+     if (builder.y < (HEIGHT/2))
+     y = 0;
+     if (builder.x > (MAP_WIDTH-(WIDTH/2)) )
+     x = WIDTH-MAP_WIDTH;
+     if (builder.y > (MAP_HEIGHT-(HEIGHT/2)) )
+     y = HEIGHT-MAP_HEIGHT;
+     */
+
+    ctx.drawImage(Img.map,0,0,Img.map.width,Img.map.height,x,y,MAP_WIDTH,MAP_HEIGHT);
+}
+
+manageTime = function() {
+
+    frameCount++;
+    if (frameCount%25 == 0)
+        seconds++;
+    if (frameCount%25 == 0 && seconds%60 == 0)
+        minutes++;
+    if (frameCount%25 == 0 && seconds%10 == 0) {
+        var spawn = {x:(21*16)+8,y:(5*16)+8}
+        //Creep(Math.random(), 'test', spawn.x, spawn.y, TILE_SIZE / 2, TILE_SIZE / 2, 'red', 1, 5, 5, false, 0, 0);
+    }
+
+    ctx.fillText(minutes + ':' + seconds%60,WIDTH-(WIDTH/10),20);
+}
+
+update = function() {
+
+    ctx.clearRect(0,0,WIDTH,HEIGHT);
+    //array_2Dmap = array_2Dmap_base;
+    drawMap();
+    //manageTime();
+    //Tower.update();
+    //Creep.update();
+    builder.update();
+
+}
+
+// Controls
+document.addEventListener('contextmenu', function(mouse) {
+    
+    /*
+    builder.destination = true;
+
+    var e = returnMapPosition(mouse.x,mouse.y);
+
+    if (e.x > 0 && e.y > 0 && e.x < MAP_WIDTH && e.y < MAP_HEIGHT) {
+        builder.destX = e.x;
+        builder.destY = e.y;
+    }
+
+    if (mouse.x < (builder.width/2) || e.x < (builder.width/2) )
+        builder.destX = (builder.width/2);
+    if (mouse.y < (builder.height/2) || e.y < (builder.height/2) )
+        builder.destY = (builder.height/2);
+    if (mouse.x > WIDTH || e.x >= MAP_WIDTH-(builder.width/2) )
+        builder.destX = MAP_WIDTH-(builder.width/2);
+    if (mouse.y > HEIGHT || e.y >= MAP_HEIGHT-(builder.height/2) )
+        builder.destY = MAP_HEIGHT-(builder.height/2);
+
+    mouse.preventDefault();
+    */
+
+});
+
+document.onclick = function(mouse){
+
+    /*
+    if (builder.building && construction.color == 'green') {
+        Tower(Math.random(),construction.race,construction.x,construction.y,construction.height,construction.width,'orange',1,construction.footprint,5,5);
+    }
+    */
+
+}
+
+document.addEventListener("mousemove", function(mouse) { //change to take into account map position
+
+    pointer.x = mouse.x;
+    pointer.y = mouse.y;
+
+});
+
+document.addEventListener("keydown", function(e) {
+    if (e.key == 'b')
+        builder.building ^= true;
+
+});
+
+// Program
+builder = builder();
+construction = construction();
+setInterval(update, INTERVAL);

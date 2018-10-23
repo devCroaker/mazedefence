@@ -1,0 +1,746 @@
+var ctx = document.getElementById('ctx').getContext('2d');
+
+//map stuff
+var INTERVAL = 1000 / 25;
+var HEIGHT = 624;
+var MAP_HEIGHT = 624;
+var WIDTH = 848;
+var MAP_WIDTH = 848;
+var TILE_SIZE = 16;
+
+//time
+var frameCount = 0;
+var seconds = 0;
+var minutes = 0;
+
+//images
+var Img = {};
+Img.map = new Image();
+Img.map.src = 'img/map.png';
+Img.cobra = new Image();
+Img.cobra.src = 'img/king_cobra.png';
+Img.knight = new Image();
+Img.knight.src = 'img/knight.png';
+Img.skeleton = new Image();
+Img.skeleton.src = 'img/skeleton.png';
+Img.tower = new Image();
+Img.tower.src = 'img/tower_round.png';
+Img.wall = new Image();
+Img.wall.src = 'img/tower_square.png';
+Img.ammo = new Image();
+Img.ammo.src = 'img/energy_ball.png';
+
+// classes
+
+//pointer base class for most everything
+generatePointer = function(x,y) {
+
+    var self = {
+        x: x,
+        y: y
+    };
+
+    self.returnTile = function() {
+
+        var x = self.x;
+        var y = self.y;
+
+        x = Math.floor(x/TILE_SIZE);
+        y = Math.floor(y/TILE_SIZE);
+
+        if (x < 0)
+            x = 0;
+        if (x > (MAP_WIDTH/TILE_SIZE)-1)
+            x = MAP_WIDTH/TILE_SIZE-1;
+        if (y < 0)
+            y = 0;
+        if (y > (MAP_HEIGHT/TILE_SIZE)-1)
+            y = MAP_HEIGHT/TILE_SIZE-1;
+
+        return {
+            arrX: x,
+            arrY: y,
+            x:x*TILE_SIZE,
+            y:y*TILE_SIZE,
+            height:TILE_SIZE,
+            width:TILE_SIZE
+        };
+
+    };
+
+    self.returnTileValue = function() {
+
+        var tile = self.returnTile();
+        return array_2Dmap[tile.arrY][tile.arrX];
+
+    };
+
+    self.testCollisionEntity = function (entity,entity2) { //return if colliding (true/false)
+        var rect1 = {
+            x:entity.x - entity.width/2,
+            y:entity.y - entity.height/2,
+            width:entity.width,
+            height:entity.height
+        };
+        var rect2 = {
+            x:entity2.x - entity2.width/2,
+            y:entity2.y - entity2.height/2,
+            width:entity2.width,
+            height:entity2.height
+        };
+        return self.testCollisionRectRect(rect1,rect2);
+
+    };
+
+    self.testCollisionRectRect = function(rect1,rect2){
+        return rect1.x <= rect2.x + rect2.width
+            && rect2.x <= rect1.x + rect1.width
+            && rect1.y <= rect2.y + rect2.height
+            && rect2.y <= rect1.y + rect1.height;
+    };
+
+    return self;
+
+};
+
+//player, has a pointer but is not a pointer
+player = function () {
+
+    var self = {
+        building: false,
+        selection: {},
+        pointer: generatePointer(0,0)
+    };
+
+    self.pointer.isOnCreep = function() {
+        for (var c in Creep.list) {
+            if (Creep.list[c].testCollisionEntity(Creep.list[c], self.pointer.returnTile())) {
+                self.selection = Creep.list[c].id;
+                return true;
+            }
+        }
+    };
+
+    self.showMenu = function() {
+
+        ctx.save();
+
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, TILE_SIZE*34.5, MAP_WIDTH, TILE_SIZE*4.5);
+        ctx.font="18px Arial";
+        ctx.fillStyle = 'white';
+        ctx.fillText('Construction',TILE_SIZE*2,TILE_SIZE*36.5);
+
+        ctx.font="10px Arial";
+        ctx.fillStyle = 'white';
+        ctx.fillText('Tower',TILE_SIZE*40,TILE_SIZE*36);
+        ctx.fillText('Wall',TILE_SIZE*43,TILE_SIZE*36);
+        ctx.fillStyle = 'blue';
+        ctx.fillRect(TILE_SIZE*40,TILE_SIZE*36,TILE_SIZE*2,TILE_SIZE*2);
+        ctx.drawImage(Img.tower,TILE_SIZE*40,TILE_SIZE*36,TILE_SIZE*2,TILE_SIZE*2);
+        ctx.fillRect(TILE_SIZE*43,TILE_SIZE*36,TILE_SIZE*2,TILE_SIZE*2);
+        ctx.drawImage(Img.wall,TILE_SIZE*43,TILE_SIZE*36,TILE_SIZE*2,TILE_SIZE*2);
+
+        ctx.restore();
+
+    };
+
+    self.update = function () {
+
+        if (self.building) {
+            self.showMenu();
+        }
+
+        if (player.construction) {
+            player.construction.update();
+        }
+
+    };
+
+    return self;
+
+};
+
+//basic entity
+generateEntity = function(x,y,width,height,img) {
+    var self = generatePointer(x,y);
+    self.id = Math.random();
+    self.width = width;
+    self.height = height;
+    self.img = img;
+
+    self.draw = function() {
+
+    };
+
+    self.update = function() {
+        self.draw();
+    };
+
+    return self;
+};
+
+// Creep code
+Creep = function (x,y,width,height,img,spd,hp) {
+
+    var self = generateEntity(x,y,width,height,img);
+    self.color = 'red';
+    self.spriteAnimCounter = 0;
+    self.spd = spd;
+    self.hpMax = hp;
+    self.hp = hp;
+    self.direction = 'offPath';
+
+    self.draw = function() {
+        ctx.save();
+
+        var x = self.x;
+        var y = self.y;
+
+        var tile = self.returnTile();
+
+        if (x < tile.x+(TILE_SIZE/2)) {
+            x = tile.x+(TILE_SIZE/2);
+        }
+        if (x > (tile.x+TILE_SIZE)+(TILE_SIZE/2)) { //
+            x = (tile.x+TILE_SIZE)+(TILE_SIZE/2);
+        }
+        if (y < tile.y+(TILE_SIZE/2)) {
+            y = tile.y+(TILE_SIZE/2);
+        }
+        if (y > (tile.y+TILE_SIZE)+(TILE_SIZE/2)) { //
+            y = (tile.y+TILE_SIZE)+(TILE_SIZE/2);
+        }
+
+        var frameWidth = self.img.width/6;
+        var frameHeight = self.img.height/6;
+
+        var directionMod = 2;	//draw right
+        if(self.direction === 'South')	//down
+            directionMod = 0;
+        else if(self.direction === 'West')	//left
+            directionMod = 1;
+        else if(self.direction === 'North')	//up
+            directionMod = 3;
+
+        var walkingArray = [1, 2, 3, 2, 1, 0, 4, 0];
+        var walkingMod = walkingArray[Math.floor(self.spriteAnimCounter)%8];//2 3 4 3 2 1 5 1
+
+        ctx.drawImage(self.img,
+            walkingMod*frameWidth,directionMod*frameHeight,frameWidth,frameHeight,
+            x-(self.width/2),y-(self.height/2),self.width,self.height
+        );
+
+        //hp bar
+        y = self.y -self.height/2-2;
+
+        ctx.fillStyle = 'red';
+        var width = TILE_SIZE*self.hp/self.hpMax;
+        if(width < 0)
+            width = 0;
+        ctx.fillRect(self.x,y,width,4);
+
+        ctx.strokeStyle = 'black';
+        ctx.strokeRect(self.x,y,TILE_SIZE,4);
+
+        ctx.restore();
+    };
+
+    self.destroyTower = function () {
+
+        var tile = self.returnTile();
+
+        if (array_2Dmap[tile.arrY][tile.arrX+1]%1 !== 0 ) { //destroy right
+            Building.list[array_2Dmap[tile.arrY][tile.arrX+1]%1].deconstruct();
+        } else if (array_2Dmap[tile.arrY+1][tile.arrX]%1 !== 0 ) { //destroy down
+            Building.list[array_2Dmap[tile.arrY+1][tile.arrX]%1].deconstruct();
+        } else if (array_2Dmap[tile.arrY-1][tile.arrX]%1 !== 0 ) { //destroy up
+            Building.list[array_2Dmap[tile.arrY-1][tile.arrX]%1].deconstruct();
+        } else if (array_2Dmap[tile.arrY][tile.arrX-1]%1 !== 0 ) { //destroy left
+            Building.list[array_2Dmap[tile.arrY][tile.arrX-1]%1].deconstruct();
+        } else { //destroy the last tower built
+            Building.list[Object.keys(Building.list)[Object.keys(Building.list).length-1]].deconstruct();
+        }
+
+    };
+
+    self.findDirection = function() {
+        var creepLocation = self.returnTile();
+        if (self.pathInfo[0] === 'blocked')
+        {
+            self.destroyTower();
+        }
+        else if (self.pathInfo.strRoute.indexOf('dft'+(creepLocation.arrY)+'dfl'+(creepLocation.arrX))  === -1 &&
+                self.pathInfo.strRoute.indexOf('dft'+(creepLocation.arrY+1)+'dfl'+(creepLocation.arrX)) !==  0 &&
+                self.pathInfo.strRoute.indexOf('dft'+(creepLocation.arrY-1)+'dfl'+(creepLocation.arrX)) !==  0 &&
+                self.pathInfo.strRoute.indexOf('dft'+(creepLocation.arrY)+'dfl'+(creepLocation.arrX-1)) !==  0 &&
+                self.pathInfo.strRoute.indexOf('dft'+(creepLocation.arrY)+'dfl'+(creepLocation.arrX+1)) !==  0 &&
+                self.pathInfo.strRoute.length                                                     !==  1 )
+        {
+            console.log('not on path');
+            //self.pathInfo.path = ['offPath'];
+            self.direction = 'offPath';
+        }
+        else if(self.pathInfo.strRoute.indexOf('dft'+(creepLocation.arrY+1)+'dfl'+(creepLocation.arrX)) ===  0 ||
+                self.pathInfo.strRoute.indexOf('dft'+(creepLocation.arrY-1)+'dfl'+(creepLocation.arrX)) ===  0 ||
+                self.pathInfo.strRoute.indexOf('dft'+(creepLocation.arrY)+'dfl'+(creepLocation.arrX+1)) ===  0 ||
+                self.pathInfo.strRoute.indexOf('dft'+(creepLocation.arrY)+'dfl'+(creepLocation.arrX-1)) ===  0 ||
+                self.pathInfo.strRoute.length                                                     ===  1)
+        {
+            self.direction = self.pathInfo.path[0];
+        }
+        else
+        {
+            self.direction = self.pathInfo.path[self.pathInfo.strRoute.indexOf('dft'+(creepLocation.arrY)+'dfl'+(creepLocation.arrX))+1];
+        }
+
+    };
+
+    self.score = function() {
+        console.log('SCORE!!!');
+        self.hp = 0;
+    };
+
+    self.setPath = function() {
+
+        var tile = self.returnTile();
+        var goal = {x:52,y:19};
+
+        var path = findShortestPath(tile, array_2Dmap, goal);
+
+        if (path) {
+            return path;
+        } else {
+            console.log('Path blocked');
+            path = ['blocked'];
+            return path;
+        }
+
+    };
+
+    self.showMenu = function() {
+
+        if (player.selection === self.id) {
+            ctx.save();
+
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, TILE_SIZE*34.5, MAP_WIDTH, TILE_SIZE*4.5);
+            ctx.font="18px Arial";
+            ctx.fillStyle = 'white';
+            ctx.fillText(player.selection,TILE_SIZE*2,TILE_SIZE*36.5);
+            ctx.fillText('HP: '+self.hp+'/'+self.hpMax ,TILE_SIZE*26.5,TILE_SIZE*36.5);
+
+            ctx.restore();
+        }
+
+    };
+
+    self.updatePosition = function() {
+        if (self.direction === 'North') {
+            self.y -= self.spd;
+        } else if (self.direction === 'East') {
+            self.x += self.spd;
+        } else if (self.direction === 'South') {
+            self.y += self.spd;
+        } else if (self.direction === 'West') {
+            self.x -= self.spd;
+        } else if (self.direction === 'offPath') {
+            self.pathInfo = self.setPath();
+            self.findDirection();
+        }
+
+        if (self.returnTileValue() === 4) {
+            self.score();
+        }
+
+        if (self.returnTileValue()%2 !== 0) { //0=path,1=wall/water,2=water_shallow,3=tower,4=goal
+            if (self.direction === 'North') {
+                self.y += self.spd;
+            } else if (self.direction === 'East') {
+                self.x -= self.spd;
+            } else if (self.direction === 'South') {
+                self.y -= self.spd;
+            } else if (self.direction === 'West') {
+                self.x += self.spd;
+            }
+            self.pathInfo = self.setPath();
+            self.findDirection();
+        }
+
+    };
+
+    self.update = function() {
+        self.spriteAnimCounter += 0.2;
+        self.showMenu();
+        self.findDirection();
+        self.updatePosition();
+        self.draw();
+    };
+
+    self.pathInfo = self.setPath();
+
+    Creep.list[self.id] = self;
+
+};
+
+Creep.list = {};
+
+Creep.update = function() {
+    for (var key in Creep.list) {
+        Creep.list[key].update()
+        if (Creep.list[key].hp <= 0) {
+            delete Creep.list[key];
+        }
+    }
+};
+
+//Buildings code
+generateConstruction = function (height,width,img) {
+
+    var self = generateEntity(0,0,width,height,img);
+    self.pointer_tile = player.pointer.returnTile();
+    self.tile_width = self.width/TILE_SIZE;
+    self.tile_height = self.height/TILE_SIZE;
+
+    self.setFootprint = function() {
+
+        self.footprint = [];
+        self.footprint_value = 0;
+
+        for (var i = 0; i < self.tile_height; i++) {
+            for (var j = 0; j < self.tile_width; j++) {
+                self.footprint.push({x: self.pointer_tile.arrX + j, y: self.pointer_tile.arrY + i});
+                if (self.pointer_tile.arrX + j < MAP_WIDTH / TILE_SIZE && self.pointer_tile.arrY + i < MAP_HEIGHT / TILE_SIZE) {
+                    self.footprint_value += array_2Dmap[self.pointer_tile.arrY + i][self.pointer_tile.arrX + j];
+                }
+            }
+        }
+
+        var tile = {
+            x: self.pointer_tile.x+(TILE_SIZE/2),
+            y: self.pointer_tile.y+(TILE_SIZE/2),
+            height: self.pointer_tile.height,
+            width: self.pointer_tile.width
+        };
+
+        for (var c in Creep.list) {
+            if (self.testCollisionEntity(tile,Creep.list[c])) {
+                self.footprint_value += 1;
+            }
+        }
+    };
+
+    self.draw = function() {
+
+        self.setFootprint();
+
+        if ( self.footprint_value === 0) { //0=path,1=wall/water,2=water_shallow,3=tower
+            self.color = 'green';
+        } else {
+            self.color = 'red';
+        }
+
+        ctx.save();
+
+        ctx.fillStyle = self.color;
+        ctx.globalAlpha = 0.6;
+        ctx.fillRect(self.pointer_tile.x,self.pointer_tile.y,self.width,self.height);
+        ctx.drawImage(self.img,self.pointer_tile.x,self.pointer_tile.y,self.width,self.height);
+
+        ctx.restore();
+
+    };
+
+    var superUpdate = self.update;
+    self.update = function() {
+
+        self.pointer_tile = player.pointer.returnTile();
+        superUpdate();
+
+    };
+
+    return self;
+
+};
+
+Building = function (construction) {
+
+    var self = construction;
+    self.x = self.pointer_tile.x;
+    self.y = self.pointer_tile.y;
+    self.atkTimer = 0;
+    self.atkRate = 25;
+
+    self.deconstruct = function() {
+        for (var i = 0; i < self.footprint.length; i++) {
+            array_2Dmap[self.footprint[i].y][self.footprint[i].x] = 0;
+        }
+
+        for (var c in Creep.list) {
+            Creep.list[c].pathInfo = Creep.list[c].setPath();
+        }
+
+        delete Building.list[self.id];
+    };
+
+    self.draw = function() {
+        self.setFootprint();
+        ctx.save();
+
+        ctx.drawImage(self.img,self.x,self.y,self.width,self.height);
+
+        ctx.restore();
+    };
+
+    self.executeAttack = function() {
+
+        if (self.img == Img.wall) {
+            return;
+        }
+
+        if (self.atkTimer%self.atkRate === 0 && Object.keys(Creep.list).length !== 0) {
+            //get target
+            var distance = MAP_WIDTH;
+            for (var c in Creep.list) {
+                var diffX = self.x - Creep.list[c].x;
+                var diffY = self.y - Creep.list[c].y;
+                var targetDistance = Math.sqrt(diffX * diffX + diffY * diffY);
+
+                if (targetDistance < distance) {
+                    self.target = Creep.list[c];
+                    distance = targetDistance;
+                }
+            }
+            //establish aim angle
+            diffX = self.target.x - self.x;
+            diffY = self.target.y - self.y;
+            self.aimAngle = Math.atan2(diffY, diffX) / Math.PI * 180;
+            //generate projectile
+            Projectile(Building.list[self.id],self.aimAngle,Img.ammo);
+        }
+    };
+
+    self.showMenu = function() {
+
+        if (player.selection === self.id) {
+            ctx.save();
+
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, TILE_SIZE*34.5, MAP_WIDTH, TILE_SIZE*4.5);
+            ctx.font="18px Arial";
+            ctx.fillStyle = 'white';
+            ctx.fillText(player.selection,TILE_SIZE*2,TILE_SIZE*36.5);
+
+            ctx.fillStyle = 'red';
+            ctx.fillRect(TILE_SIZE*45,TILE_SIZE*36.5,TILE_SIZE*4.5,TILE_SIZE*1.5);
+            ctx.font="12px Arial";
+            ctx.fillStyle = 'black';
+            ctx.fillText('Delete Me', TILE_SIZE*45.5,TILE_SIZE*37.5);
+
+            ctx.restore();
+        }
+
+    };
+
+    self.updateMap = function() {
+        for (var i = 0; i < self.footprint.length; i++) {
+            array_2Dmap[self.footprint[i].y][self.footprint[i].x] = self.id;
+        }
+    };
+
+    self.update = function() {
+        self.atkTimer++;
+        self.updateMap();
+        self.showMenu();
+        self.draw();
+        self.executeAttack();
+    };
+
+    Building.list[self.id] = self;
+
+};
+
+Building.list = {};
+
+Building.update = function(){
+    for (var key in Building.list) {
+        Building.list[key].update()
+    }
+};
+
+//Projectile Code
+Projectile = function(origin,aimAngle,img) {
+
+    var self = generateEntity(origin.x+(origin.width/2),origin.y+(origin.height/2),8,8,img);
+
+    self.origin = origin;
+    self.aimAngle = aimAngle;
+    self.spdX = Math.cos(aimAngle/180*Math.PI)*8;
+    self.spdY = Math.sin(aimAngle/180*Math.PI)*5;
+    self.timer = 0;
+    self.toRemove = false;
+
+    self.draw = function() {
+        ctx.save();
+        var x = self.x - self.width/2;
+        var y = self.y - self.height/2;
+
+        ctx.drawImage(self.img,
+            0,0,self.img.width,self.img.height,
+            x,y,self.width,self.height
+        );
+
+        ctx.restore();
+    };
+
+    self.updatePosition = function() {
+        self.x += self.spdX;
+        self.y += self.spdY;
+
+        if(self.x < 0 || self.x > MAP_WIDTH){
+            self.toRemove = true;
+        }
+        if(self.y < 0 || self.y > MAP_HEIGHT){
+            self.toRemove = true;
+        }
+    };
+
+    self.update = function() {
+        self.updatePosition();
+        self.draw();
+
+        self.timer++;
+        if(self.timer > 50) { //2 seconds
+            self.toRemove = true;
+        }
+
+        for (var c in Creep.list) {
+            if (self.testCollisionEntity(self, Creep.list[c])) {
+                self.toRemove = true;
+                Creep.list[c].hp -= 1;
+            }
+        }
+    };
+
+    Projectile.list[self.id] = self;
+
+};
+
+Projectile.list = {};
+
+Projectile.update = function() {
+    for(var key in Projectile.list){
+        Projectile.list[key].update();
+        if(Projectile.list[key].toRemove){
+            delete Projectile.list[key];
+        }
+    }
+};
+
+//action functions
+drawMap = function(){
+
+    var x = 0;
+    var y = 0;
+
+    ctx.drawImage(Img.map,0,0,Img.map.width,Img.map.height,x,y,MAP_WIDTH,MAP_HEIGHT);
+}
+
+manageTime = function() {
+
+    frameCount++;
+    if (frameCount%25 == 0)
+        seconds++;
+    if (frameCount%25 == 0 && seconds%60 == 0)
+        minutes++;
+    if (frameCount%25 == 0 && seconds%2 == 0) {
+        Creep(TILE_SIZE*2,MAP_HEIGHT/2,16,16,Img.skeleton,4,20);
+    }
+
+    ctx.fillText(minutes + ':' + seconds%60, WIDTH-(WIDTH/10),10);
+};
+
+update = function() {
+
+    ctx.clearRect(0,0,WIDTH,HEIGHT);
+    drawMap();
+    manageTime();
+    Building.update();
+    Creep.update();
+    Projectile.update();
+    player.update();
+
+};
+
+// Controls //
+
+ctx.drawImage(Img.tower,TILE_SIZE*40,TILE_SIZE*36,TILE_SIZE*2,TILE_SIZE*2);
+ctx.drawImage(Img.wall,TILE_SIZE*43,TILE_SIZE*36,TILE_SIZE*2,TILE_SIZE*2);
+
+document.onclick = function(){
+
+    if (player.pointer.y > TILE_SIZE*34.5) { //clicked on menu
+
+        if (player.building) { // player is building
+
+            if (player.pointer.x > TILE_SIZE*40 && player.pointer.x < TILE_SIZE*42 && player.pointer.y > TILE_SIZE*36 && player.pointer.y < TILE_SIZE*38) { // tower
+                player.construction = generateConstruction(32,32,Img.tower);
+                document.getElementById('ctx').style.cursor = 'none';
+            }
+
+            if (player.pointer.x > TILE_SIZE*43 && player.pointer.x < TILE_SIZE*45 && player.pointer.y > TILE_SIZE*36 && player.pointer.y < TILE_SIZE*38) { // wall
+                player.construction = generateConstruction(32,32,Img.wall);
+                document.getElementById('ctx').style.cursor = 'none';
+            }
+
+
+        } else if ( player.selection !== '') { //have a selected tower?
+            if (player.pointer.x > TILE_SIZE*45 && player.pointer.x < TILE_SIZE*49.5 && player.pointer.y > TILE_SIZE*36.5 && player.pointer.y < TILE_SIZE*38) { // delete button
+                Building.list[player.selection].deconstruct();
+            }
+        }
+
+    } else if (player.pointer.y <= TILE_SIZE*34.5) { // clicked above menu
+
+        if (player.building) { //player is building
+
+            if (player.construction && player.construction.color == 'green') {
+                Building(player.construction);
+                delete player.construction;
+                document.getElementById('ctx').style.cursor = 'url(http://cur.cursors-4u.net/games/gam-3/gam257.cur), progress';
+            }
+
+        } else if (Building.list.hasOwnProperty(player.pointer.returnTileValue())) { //clicked on tower?
+            player.selection = player.pointer.returnTileValue();
+        } else if (player.pointer.isOnCreep()) {
+            //you have selected the creep
+        } else {
+            delete player.selection;
+        }
+
+    }
+
+};
+
+document.addEventListener("mousemove", function(mouse) {
+
+    var rect = document.getElementById('ctx').getBoundingClientRect();
+
+    player.pointer.x = mouse.clientX - rect.left;
+    player.pointer.y = mouse.clientY - rect.top;
+
+});
+
+document.addEventListener("keydown", function(e) {
+
+    if (e.key == 'b') {
+        player.building ^= true;
+        delete player.selection;
+    }
+
+});
+
+// Program //
+
+player = player();
+setInterval(update, INTERVAL);
